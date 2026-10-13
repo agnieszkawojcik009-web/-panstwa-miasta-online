@@ -1,1 +1,44 @@
-
+<!doctype html>
+<html lang="pl"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Państwa Miasta Online</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#f4f7ff;background:#101727}*{box-sizing:border-box}body{margin:0}main{max-width:950px;margin:auto;padding:20px}h1{font-size:clamp(26px,6vw,42px);margin:12px 0}h2{margin:8px 0 16px}.muted{color:#b7c5db}.card{background:#1d2940;border:1px solid #394964;border-radius:18px;padding:20px;margin:16px 0}input,select,button{font:inherit;border-radius:10px;padding:12px;max-width:100%}input,select{background:#101a2d;color:white;border:1px solid #60708a;width:100%;margin:5px 0 12px}button{background:#54d6b1;color:#0a2220;border:0;font-weight:700;cursor:pointer;margin:5px 6px 5px 0}button.secondary{background:#344766;color:white}button.danger{background:#f29e9e}button:disabled{opacity:.5}.hidden{display:none}.flex{display:flex;flex-wrap:wrap;gap:10px;align-items:center}.pill{display:inline-block;padding:6px 12px;border-radius:99px;background:#344766}.answer{border-top:1px solid #394964;padding:12px 0}.answer strong{display:block}.answer button{padding:7px 11px}.selected{outline:3px solid white}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px}.grid label{display:block}.score{font-size:20px;font-weight:700}.big{font-size:36px;font-weight:800}#notice{position:sticky;top:0;background:#753f48;padding:12px;border-radius:8px;display:none;z-index:2}small{color:#b7c5db}table{width:100%;border-collapse:collapse}td,th{padding:10px;border-bottom:1px solid #394964;text-align:left}label.check{display:inline-flex;align-items:center;gap:6px;margin:6px 12px 6px 0}label.check input{width:auto;margin:0}
+</style></head><body><main><h1>🌍 Państwa Miasta Online</h1><p class="muted">Graj ze znajomymi na żywo • maksymalnie 12 osób</p><div id="notice"></div>
+<section id="home" class="card"><h2>Wejdź do gry</h2><label>Twój pseudonim<input id="name" maxlength="24" placeholder="Np. Agnieszka"></label><div class="flex"><button id="create">Utwórz pokój</button></div><hr><label>Kod pokoju<input id="joinCode" maxlength="6" placeholder="6 znaków" autocapitalize="characters"></label><button id="join">Dołącz do pokoju</button></section>
+<section id="game" class="hidden"><div class="card"><div class="flex"><h2>Pokój <span id="roomCode"></span></h2><button class="secondary" id="copy">Kopiuj kod</button><button class="danger" id="leave">Opuść</button></div><p id="phase" class="muted"></p><div id="players"></div></div>
+<div id="lobby" class="card hidden"><h2>Ustawienia rundy</h2><div id="hostSettings" class="hidden"><label>Czas rundy (sekundy)<input id="duration" type="number" min="20" max="300" value="90"></label><label>Kategorie (oddziel przecinkami)<input id="categories" value="Państwo, Miasto, Imię, Zwierzę, Roślina, Rzecz"></label><button id="save">Zapisz ustawienia</button><button id="start">Rozpocznij rundę</button></div><p id="waiting" class="muted">Czekamy na gospodarza…</p></div>
+<div id="playing" class="card hidden"><div class="flex"><div>Litera: <span class="big" id="letter"></span></div><div>Pozostało: <span class="big" id="timer"></span>s</div></div><div id="fields" class="grid"></div><button id="submit">Wyślij odpowiedzi</button><button id="endRound" class="secondary hidden">Zakończ rundę wcześniej</button><p id="sent" class="muted"></p></div>
+<div id="review" class="card hidden"><h2>Sprawdzanie odpowiedzi</h2><p class="muted">Gospodarz ocenia każdą odpowiedź. Pozostali czekają na wyniki.</p><div id="reviews"></div><button id="finish" class="hidden">Zatwierdź punkty i pokaż ranking</button></div>
+<div id="results" class="card hidden"><h2>🏆 Ranking po rundzie</h2><div id="ranking"></div><div id="details"></div><button id="next" class="hidden">Kolejna runda</button></div>
+</section><p><small>Uwaga: na darmowym hostingu pokoje i wyniki są przechowywane w pamięci serwera. Restart usługi usuwa bieżące pokoje.</small></p></main>
+<script src="/socket.io/socket.io.js"></script><script>
+const $=id=>document.getElementById(id), socket=io();let me=null,state=null,clock=null;
+const text=(v)=>String(v??'');const esc=v=>text(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const show=(id,on)=>$(id).classList.toggle('hidden',!on);
+function notice(msg){$('notice').textContent=msg;$('notice').style.display='block';setTimeout(()=>$('notice').style.display='none',5000)}
+function enter(){const n=$('name').value.trim();if(!n){notice('Podaj pseudonim.');return null;}localStorage.setItem('pm-name',n);return n;}
+$('name').value=localStorage.getItem('pm-name')||'';
+$('create').onclick=()=>{const name=enter();if(name)socket.emit('create',{name})};
+$('join').onclick=()=>{const name=enter(),code=$('joinCode').value.trim().toUpperCase();if(name&&code)socket.emit('join',{name,code})};
+$('copy').onclick=async()=>{try{await navigator.clipboard.writeText(state.code);notice('Kod skopiowany.')}catch{notice('Kod: '+state.code)}};
+$('leave').onclick=()=>{socket.emit('leave');localStorage.removeItem('pm-session');me=null;state=null;show('game',false);show('home',true)};
+$('save').onclick=()=>{const categories=$('categories').value.split(',').map(s=>s.trim()).filter(Boolean);socket.emit('settings',{categories,duration:Number($('duration').value)})};
+$('start').onclick=()=>socket.emit('start');$('next').onclick=()=>socket.emit('start');$('endRound').onclick=()=>socket.emit('endRound');
+$('submit').onclick=()=>{const answers={};document.querySelectorAll('[data-category]').forEach(el=>answers[el.dataset.category]=el.value);socket.emit('submit',{answers})};
+$('finish').onclick=()=>socket.emit('finish');
+socket.on('joined',info=>{me=info;localStorage.setItem('pm-session',JSON.stringify({code:info.code,token:info.token,name:$('name').value}));show('home',false);show('game',true)});
+socket.on('notice',notice);socket.on('closed',()=>{notice('Gospodarz zamknął pokój.');localStorage.removeItem('pm-session');me=null;state=null;show('game',false);show('home',true)});
+socket.on('connect',()=>{const old=JSON.parse(localStorage.getItem('pm-session')||'null');if(old&&!me){$('name').value=old.name;socket.emit('join',old)}});
+function render(){if(!state||!me)return;const r=state,isHost=r.hostId===me.id,p=r.players.find(p=>p.id===me.id);
+$('roomCode').textContent=r.code;$('phase').textContent=`Runda ${r.round} • ${ {lobby:'Poczekalnia',playing:'Wpisywanie odpowiedzi',review:'Ocena odpowiedzi',results:'Wyniki'}[r.status]}`;
+$('players').innerHTML=r.players.map(p=>`<span class="pill">${esc(p.name)} ${p.id===r.hostId?'👑':''} ${p.connected?'':'(offline)'} • ${p.score} pkt</span>`).join(' ');
+['lobby','playing','review','results'].forEach(s=>show(s,r.status===s));show('hostSettings',isHost);show('waiting',!isHost);show('endRound',isHost);show('finish',isHost);show('next',isHost);
+if(r.status==='lobby'){$('duration').value=r.duration;$('categories').value=r.categories.join(', ')}
+if(r.status==='playing'){$('letter').textContent=r.letter;const submitted=!!p?.submitted;const previous={};document.querySelectorAll('[data-category]').forEach(el=>previous[el.dataset.category]=el.value);
+$('fields').innerHTML=r.categories.map(c=>`<label>${esc(c)}<input data-category="${esc(c)}" maxlength="80" placeholder="Na literę ${esc(r.letter)}" ${submitted?'disabled':''} value="${esc(previous[c]||'')}"></label>`).join('');$('submit').disabled=submitted;$('sent').textContent=submitted?'Odpowiedzi wysłane. Czekamy na innych.':'';updateClock()}
+if(r.status==='review'){$('reviews').innerHTML=r.categories.map(c=>`<h3>${esc(c)}</h3>`+r.players.map(p=>{const a=r.answers[p.id]?.[c]||'',v=r.judgments[p.id]?.[c];return `<div class="answer"><strong>${esc(p.name)}: ${esc(a)||'—'}</strong>${a?(isHost?`<button class="${v===true?'selected':''}" data-judge="1" data-player="${esc(p.id)}" data-cat="${esc(c)}">✓ Poprawna</button><button class="danger ${v===false?'selected':''}" data-judge="0" data-player="${esc(p.id)}" data-cat="${esc(c)}">✕ Błędna</button>`:`${v===true?'✓ Poprawna':v===false?'✕ Błędna':'Czeka na ocenę'}`):'0 pkt'}</div>`}).join('')).join('');document.querySelectorAll('[data-judge]').forEach(b=>b.onclick=()=>socket.emit('judge',{playerId:b.dataset.player,category:b.dataset.cat,valid:b.dataset.judge==='1'}))}
+if(r.status==='results'){$('ranking').innerHTML='<table><tr><th>Miejsce</th><th>Gracz</th><th>Suma</th></tr>'+r.ranking.map((p,i)=>`<tr><td>${i+1}</td><td>${esc(p.name)}</td><td>${p.score} pkt</td></tr>`).join('')+'</table>';
+$('details').innerHTML='<h3>Punkty w tej rundzie</h3>'+r.players.map(p=>`<p><strong>${esc(p.name)}</strong>: ${r.categories.map(c=>`${esc(c)} ${r.points[p.id]?.[c]||0}`).join(' • ')}</p>`).join('')}
+}
+function updateClock(){if(state?.status==='playing')$('timer').textContent=Math.max(0,Math.ceil((state.endsAt-Date.now())/1000))}
+clock=setInterval(updateClock,250);socket.on('state',r=>{state=r;render()});
+</script></body></html>

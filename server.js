@@ -156,7 +156,7 @@ async function refresh(){
   if(!session)return;
   try{
     const next=await api('state');
-    const changed=!S||next.rev!==S.rev||next.phase!==S.phase;
+    const changed=!S||next.phase!==S.phase||(next.phase!=='play'&&next.rev!==S.rev);
     S=next;
     if(changed)render();
     clock();

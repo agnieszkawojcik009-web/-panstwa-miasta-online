@@ -37,7 +37,13 @@ if(op==='state')return reply(res,200,state(r,b.token));
 if(op==='events'){res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache','Connection':'keep-alive'});res.write('data: '+r.rev+'\n\n');r.listeners.add(res);req.on('close',()=>r.listeners.delete(res));return}
 if(op==='start'){if(!host||!['lobby','between'].includes(r.phase)||r.round>=r.rounds)throw Error('Nie można teraz rozpocząć');begin(r)}
 else if(op==='answer'){if(r.phase!=='play'||p.stop||Date.now()>=r.deadline)throw Error('Odpowiedzi zablokowane');if(!r.cats.includes(b.cat))throw Error('Nieznana kategoria');p.answers[b.cat]=clean(b.value);notify(r)}
-else if(op==='stop'){if(r.phase!=='play'||Date.now()>=r.deadline||p.stop)throw Error('STOP niedostępny');if(!r.cats.every(c=>clean(p.answers[c])))throw Error('Wypełnij wszystkie pola');p.stop=Date.now();if(!r.stopper){r.stopper=p.name;r.deadline=Math.min(r.deadline,Date.now()+r.stopTime*1000)}notify(r)}
+else if(op==='stop'){if(r.phase!=='play'||Date.now()>=r.deadline||p.stop)throw Error('STOP niedostępny');if(!r.cats.every(c=>clean(p.answers[c])))throw Error('Wypełnij wszystkie pola');p.stop=Date.now();if(!r.stopper){r.stopper=p.name;r.deadline=Math.min(r.deadline,Date.now()+r.stopTime*1000)}
+if(r.players.every(x=>x.stop)) {
+  r.phase='review';
+  r.idx=0;
+  r.deadline=0;
+}
+                     notify(r)}
 else if(op==='score'){if(!host||r.phase!=='review')throw Error('Tylko gospodarz ocenia');if(!r.players.some(x=>x.id===b.id)||![0,5,10,15].includes(+b.value))throw Error('Błędne punkty');const cat=r.cats[r.idx];r.points[r.round][cat]??={};r.points[r.round][cat][b.id]=+b.value;notify(r)}
 else if(op==='next'){if(!host||r.phase!=='review')throw Error('Tylko gospodarz zatwierdza');if(r.idx<r.cats.length-1){r.idx++;notify(r)}else finishRound(r)}
 else if(op==='finish'){if(!host||!['between','lobby'].includes(r.phase))throw Error('Najpierw zakończ rundę');r.phase='final';notify(r)}

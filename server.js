@@ -24,7 +24,7 @@ function person(r,t){return r.players.find(p=>p.token===t)}
 function valid(r,c,a){a=norm(a);return !a?'empty':a[0]!==norm(r.letter)?'wrong':dict[c]?.has(a)?'valid':'review'}
 function rows(r,c){let count={};for(const p of r.players){let a=norm(p.answers[c]);if(a)count[a]=(count[a]||0)+1}return r.players.map(p=>{const a=p.answers[c]||'',v=valid(r,c,a),duplicate=(count[norm(a)]||0)>1,others=r.players.some(x=>x!==p&&x.answers[c]);const suggested=v==='valid'?(duplicate?5:others?10:15):0;return {id:p.id,name:p.name,answer:a,valid:v,duplicate,points:r.points[r.round]?.[c]?.[p.id]??suggested}})}
 function totals(r){return r.players.map(p=>{let correct=0,possible=r.history.length*r.cats.length,times=[];for(const h of r.history){const x=h.players.find(x=>x.id===p.id);if(x){correct+=Object.values(x.points).filter(v=>v>0).length;if(x.stop)times.push(Math.round((x.stop-h.start)/1000))}}return {name:p.name,total:p.total,correct,possible,percent:possible?Math.round(correct/possible*100):0,speed:times.length?Math.round(times.reduce((a,b)=>a+b)/times.length):null}}).sort((a,b)=>b.total-a.total||(a.speed??Infinity)-(b.speed??Infinity))}
-function state(r,t){const p=person(r,t);return {rev:r.rev,code:r.code,phase:r.phase,host:r.players[0]===p,me:p.id,players:r.players.map(x=>({id:x.id,name:x.name,total:x.total})),cats:r.cats,round:r.round,rounds:r.rounds,roundTime:r.roundTime,stopTime:r.stopTime,letter:r.letter,deadline:r.deadline,stopper:r.stopper,answers:p.answers,locked:!!p.stop,idx:r.idx,review:r.phase==='review'?rows(r,r.cats[r.idx]):[],history:r.history,final:r.phase==='final'?totals(r):null}}
+function state(r,t){const p=person(r,t);return {rev:r.rev,code:r.code,phase:r.phase,host:r.players[0]===p,me:p.id,players:r.players.map(x=>({id:x.id,name:x.name,total:x.total})),cats:r.cats,round:r.round,rounds:r.rounds,roundTime:r.roundTime,stopTime:r.stopTime,letter:r.letter,deadline:r.deadline,stopper:r.stopper,answers:p.answers,locked:!!p.stop,idx:r.idx,review:r.phase==='review'?rows(r,r.cats[r.idx]):[],history:r.history,chat:r.chat||[],typing:Object.values(r.typing||{}).filter(x=>x.until>Date.now()),final:r.phase==='final'?totals(r):null}}
 function begin(r){r.round++;r.phase='play';r.letter=LETTERS[crypto.randomInt(LETTERS.length)];r.start=Date.now();r.deadline=r.start+r.roundTime*1000;r.stopper='';r.idx=0;r.points[r.round]={};for(const p of r.players){p.answers={};p.stop=0}notify(r)}
 function finishRound(r){const ps=r.players.map(p=>{const pts={};for(const c of r.cats){pts[c]=rows(r,c).find(x=>x.id===p.id).points;p.total+=pts[c]}return {id:p.id,name:p.name,answers:{...p.answers},points:pts,stop:p.stop}});r.history.push({letter:r.letter,start:r.start,players:ps});r.phase='between';r.deadline=0;notify(r)}
 setInterval(()=>{for(const r of rooms.values()){if(r.phase==='play'&&Date.now()>=r.deadline){r.phase='review';r.idx=0;notify(r)}}},400).unref();
@@ -37,7 +37,28 @@ if(op==='state')return reply(res,200,state(r,b.token));
 if(op==='events'){res.writeHead(200,{'Content-Type':'text/event-stream; charset=utf-8','Cache-Control':'no-cache','Connection':'keep-alive'});res.write('data: '+r.rev+'\n\n');r.listeners.add(res);req.on('close',()=>r.listeners.delete(res));return}
 if(op==='start'){if(!host||!['lobby','between'].includes(r.phase)||r.round>=r.rounds)throw Error('Nie można teraz rozpocząć');begin(r)}
 else if(op==='answer'){if(r.phase!=='play'||p.stop||Date.now()>=r.deadline)throw Error('Odpowiedzi zablokowane');if(!r.cats.includes(b.cat))throw Error('Nieznana kategoria');p.answers[b.cat]=clean(b.value);notify(r)}
-else if(op==='stop'){if(r.phase!=='play'||Date.now()>=r.deadline||p.stop)throw Error('STOP niedostępny');if(!r.cats.every(c=>clean(p.answers[c])))throw Error('Wypełnij wszystkie pola');p.stop=Date.now();if(!r.stopper){r.stopper=p.name;r.deadline=Math.min(r.deadline,Date.now()+r.stopTime*1000)}
+  else if(op==='chat'){
+  const message=clean(b.message,300);
+  if(!message)throw Error('Wpisz wiadomość');
+  r.chat??=[];
+  r.chat.push({
+    name:p.name,
+    message,
+    time:Date.now()
+  });
+  if(r.chat.length>100)r.chat.shift();
+  notify(r);
+  }
+else if(op==='typing'){
+  r.typing??={};
+  if(b.active){
+    r.typing[p.id]={name:p.name,until:Date.now()+3000};
+  }else{
+    delete r.typing[p.id];
+  }
+  notify(r);
+}
+  else if(op==='stop'){if(r.phase!=='play'||Date.now()>=r.deadline||p.stop)throw Error('STOP niedostępny');if(!r.cats.every(c=>clean(p.answers[c])))throw Error('Wypełnij wszystkie pola');p.stop=Date.now();if(!r.stopper){r.stopper=p.name;r.deadline=Math.min(r.deadline,Date.now()+r.stopTime*1000)}
 if(r.players.every(x=>x.stop)) {
   r.phase='review';
   r.idx=0;
@@ -100,6 +121,84 @@ footer{text-align:center;color:#8c9bb2;margin:35px}
 .hidden{display:none}
 #error{position:sticky;top:8px;z-index:10}
 @media(max-width:570px){.grid{grid-template-columns:1fr}}
+/* Czat podczas gry */
+#chatToggle{
+  position:fixed;
+  right:14px;
+  bottom:18px;
+  z-index:100;
+  border:0;
+  border-radius:18px;
+  background:#88dfc1;
+  color:#10251f;
+  padding:13px 18px;
+  font-weight:800;
+  box-shadow:0 8px 25px #0008;
+}
+
+#chatPanel{
+  position:fixed;
+  right:12px;
+  bottom:76px;
+  width:min(360px,calc(100vw - 24px));
+  height:min(470px,70dvh);
+  z-index:100;
+  background:#1c2435;
+  border:1px solid #45516a;
+  border-radius:20px;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden;
+  box-shadow:0 15px 45px #000a;
+}
+
+#chatPanel.hidden{
+  display:none;
+}
+
+#chatMessages{
+  flex:1;
+  overflow-y:auto;
+  padding:14px;
+  color:#f2f5ff;
+}
+
+.chatMessage{
+  margin-bottom:12px;
+  overflow-wrap:anywhere;
+}
+
+.chatMessage strong{
+  color:#88dfc1;
+}
+
+#chatTyping{
+  min-height:24px;
+  padding:4px 14px;
+  color:#aebbd0;
+  font-size:13px;
+}
+
+.chatDots{
+  display:inline-block;
+  animation:chatPulse 1s infinite;
+}
+
+@keyframes chatPulse{
+  0%,100%{opacity:.25}
+  50%{opacity:1}
+}
+
+#chatForm{
+  display:flex;
+  gap:8px;
+  padding:10px;
+}
+
+#chatInput{
+  flex:1;
+  min-width:0;
+}
 </style>
 </head>
 <body>
@@ -111,6 +210,31 @@ footer{text-align:center;color:#8c9bb2;margin:35px}
 </header>
 <div id="error" class="alert hidden"></div>
 <div id="app"></div>
+<button id="chatToggle" type="button" onclick="toggleChat()">
+  💬 Czat
+</button>
+
+<div id="chatPanel" class="hidden">
+  <div style="padding:14px;display:flex;justify-content:space-between;align-items:center">
+    <strong>💬 Czat graczy</strong>
+    <button type="button" onclick="toggleChat()">✕</button>
+  </div>
+
+  <div id="chatMessages"></div>
+  <div id="chatTyping"></div>
+
+  <form id="chatForm" onsubmit="sendChat(event)">
+    <input
+      id="chatInput"
+      type="text"
+      maxlength="300"
+      placeholder="Napisz wiadomość..."
+      autocomplete="off"
+      oninput="chatIsTyping()"
+    >
+    <button type="submit">Wyślij</button>
+  </form>
+</div>
 <footer>Debile kontra Kapusty • Do 12 graczy</footer>
 </main>
 <script>
@@ -119,6 +243,68 @@ let session=null,S=null,stream=null,poll=null,tick=null;
 const el=id=>document.getElementById(id),app=el('app');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function error(s){el('error').textContent=s;el('error').classList.remove('hidden');setTimeout(()=>el('error').classList.add('hidden'),6000)}
+let chatOpen=false;
+let chatTypingTimer=null;
+
+function toggleChat(){
+  chatOpen=!chatOpen;
+  el('chatPanel').classList.toggle('hidden',!chatOpen);
+  if(chatOpen)updateChat();
+}
+
+async function sendChat(event){
+  event.preventDefault();
+  const input=el('chatInput');
+  const message=input.value.trim();
+  if(!message||!session)return;
+
+  try{
+    await api('chat',{message});
+    input.value='';
+    await api('typing',{active:false});
+    updateChat();
+  }catch(e){
+    error(e.message);
+  }
+}
+
+function chatIsTyping(){
+  if(!session)return;
+
+  api('typing',{active:true}).catch(()=>{});
+
+  clearTimeout(chatTypingTimer);
+  chatTypingTimer=setTimeout(()=>{
+    api('typing',{active:false}).catch(()=>{});
+  },2000);
+}
+
+function updateChat(){
+  if(!S)return;
+
+  const box=el('chatMessages');
+  if(!box || !el('chatTyping'))return;
+  const messages=S.chat||[];
+
+  const html=messages.map(m=>
+    '<div class="chatMessage"><strong>'+
+    esc(m.name)+':</strong> '+
+    esc(m.message)+'</div>'
+  ).join('');
+
+  if(box.innerHTML!==html){
+    box.innerHTML=html;
+    box.scrollTop=box.scrollHeight;
+  }
+
+  const typing=(S.typing||[])
+    .filter(x=>x.name!==S.players.find(p=>p.id===S.me)?.name);
+
+  el('chatTyping').innerHTML=typing.length
+    ?esc(typing.map(x=>x.name).join(', '))+
+     ' pisze<span class="chatDots"> ● ● ●</span>'
+    :'';
+}
 async function api(op,b={}){
   let r;
   try{r=await fetch('/api/'+op,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...b,...(session||{})})})}
@@ -165,6 +351,7 @@ async function refresh(){
     const changed=!S||next.phase!==S.phase||(next.phase!=='play'&&next.rev!==S.rev);
     S=next;
     if(changed)render();
+    updateChat();
     clock();
   }catch(x){
     if(x.message==='Pokój nie istnieje'||x.message==='Brak dostępu do pokoju'){
